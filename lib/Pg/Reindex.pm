@@ -691,6 +691,102 @@ sub rebuild {
     }
 }
 
+sub run {
+    my ($opt_help,       $opt_dbname, $opt_server,
+        $opt_user,       $opt_pwd,    $opt_port,
+        @opt_namespaces, @opt_tables, @opt_indexes,
+        $opt_validate,   $opt_dryrun, $opt_throttle_on,
+        $opt_throttle_off
+    );
+    (   $opt_user, $opt_port, $opt_server, $opt_validate, $opt_throttle_on,
+        $opt_throttle_off
+    ) = (qw/postgres 5432 localhost 1 10000000 100000/);
+
+    GetOptions(
+        'help'              => \$opt_help,
+        'database|dbname=s' => \$opt_dbname,
+        'server=s'          => \$opt_server,
+        'user=s'            => \$opt_user,
+        'password=s'        => \$opt_pwd,
+        'port=s'            => \$opt_port,
+        'table=s'           => \@opt_tables,
+        'namespace=s'       => \@opt_namespaces,
+        'index=s'           => \@opt_indexes,
+        'validate!'         => \$opt_validate,
+        'dryrun!'           => \$opt_dryrun,
+        'high-txn-lag=i'    => \$opt_throttle_on,
+        'low-txn-lag=i'     => \$opt_throttle_off,
+        )
+        || pod2usage(
+        -exitval => 1,
+        -verbose => 2
+        );
+
+    my $action = $ARGV[0];
+    if ($action) {
+        if ( $action =~ /^p(?:r(?:e(?:p(?:a(?:re?)?)?)?)?)?$/i ) {
+            $action = 'prepare';
+        } elsif ( $action =~ /^c(?:o(?:n(?:t(?:i(?:n(?:ue?)?)?)?)?)?)?$/i ) {
+            $action = 'continue';
+        } else {
+            pod2usage(
+                -exitval => 1,
+                -verbose => 2
+            );
+        }
+    }
+
+    pod2usage(
+        -exitval => 0,
+        -verbose => 2
+    ) if $opt_help;
+
+    {
+        my $fh;
+        if ( !defined $opt_pwd ) {
+
+            # noop
+        } elsif ( $opt_pwd =~ /^\d+$/ ) {
+            open $fh, '<&=' . $opt_pwd    ## no critic
+                or die "Cannot open file descriptor $opt_pwd: $!\n";
+            $opt_pwd = readline $fh;
+            chomp $opt_pwd;
+        } else {
+            open $fh, '<', $opt_pwd or die "Cannot open $opt_pwd: $!\n";
+            $opt_pwd = readline $fh;
+            chomp $opt_pwd;
+        }
+        close $fh;
+    }
+
+    my $dbh = DBI->connect(
+        "dbi:Pg:database=$opt_dbname;host=$opt_server;port=$opt_port;sslmode=prefer",
+        $opt_user,
+        $opt_pwd,
+        {   pg_server_prepare => 0,
+            PrintError        => 0,
+            RaiseError        => 1,
+        }
+    );
+
+    prepare( $dbh, \@opt_namespaces, \@opt_tables, \@opt_indexes )
+        unless defined $action and $action eq 'continue';
+
+    rebuild(
+        $dbh,
+        {   ThrottleOn  => $opt_throttle_on,
+            ThrottleOff => $opt_throttle_off,
+            Validate    => $opt_validate
+        },
+        $opt_dryrun
+    ) if !defined $action or $action eq 'continue';
+
+    $dbh->disconnect;
+    exit 0;
+}
+
+__PACKAGE__->run unless caller;
+
 =head1 AUTHOR
 
 Torsten Förtsch, C<< <binary at cpan.org> >>
