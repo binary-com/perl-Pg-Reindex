@@ -1,5 +1,5 @@
 package Pg::Reindex;
-require Exporter;
+use Exporter qw/import/;
 @ISA       = qw(Exporter);
 @EXPORT_OK = qw(prepare rebuild);
 
@@ -34,8 +34,8 @@ our $VERSION = '0.01';
 
     use Pg::Reindex;
 
-    Pg::Reindex::prepare($dbh, \@namespaces, \@tables, \@indexes);
-    Pg::Reindex::rebuild($dbh, \%options, $dryrun);
+    prepare($dbh, \@namespaces, \@tables, \@indexes);
+    rebuild($dbh, \%options, $dryrun);
     
 =head1 DESCRIPTION
 
@@ -81,11 +81,11 @@ first you need to load the DBI module:
 Then you need to L</prepare> the indexes that you want rebuilt.
 You can filter by combinations of namespace, tables, and indexes.
 
-    Pg::Reindex::prepare($dbh, \@opt_namespaces,\@opt_tables, \@opt_indexes);
+    prepare($dbh, \@opt_namespaces,\@opt_tables, \@opt_indexes);
 
-After "preparing" the set of indexes to rebuilt, then you rebuild them:
+After "preparing" the set of indexes to be rebuilt, then you rebuild them:
 
-    Pg::Reindex::rebuild( $dbh, { ThrottleOn => 10000000, 
+    rebuild( $dbh, { ThrottleOn => 10000000, 
         ThrottleOff => 100000, Validate => 1 }, $opt_dryrun);
 
 
@@ -796,39 +796,6 @@ Torsten Förtsch, C<< <binary at cpan.org> >>
 Please report any bugs or feature requests to C<bug-pg-reindex at rt.cpan.org>, or through
 the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Pg-Reindex>.  I will be notified, and then you'll
 automatically be notified of progress on your bug as I make changes.
-
-
-
-
-=head1 SUPPORT
-
-You can find documentation for this module with the perldoc command.
-
-    perldoc Pg::Reindex
-
-
-You can also look for information at:
-
-=over 4
-
-=item * RT: CPAN's request tracker (report bugs here)
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Pg-Reindex>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/Pg-Reindex>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Pg-Reindex>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/Pg-Reindex/>
-
-=back
-
 
 =head1 ACKNOWLEDGEMENTS
 
