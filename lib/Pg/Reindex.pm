@@ -1,7 +1,7 @@
 package Pg::Reindex;
 require Exporter;
 @ISA       = qw(Exporter);
-@EXPORT_OK = qw(prepare reindex);
+@EXPORT_OK = qw(prepare rebuild);
 
 use 5.010001;
 use strict;
@@ -19,7 +19,8 @@ our ( $dbh, $opt_dryrun, $opt_throttle_on, $opt_throttle_off );
 
 =head1 NAME
 
-Pg::Reindex - The great new Pg::Reindex!
+Pg::Reindex - rebuild postgresql indexes concurrently without locking.
+
 
 =head1 VERSION
 
@@ -31,24 +32,119 @@ our $VERSION = '0.01';
 
 =head1 SYNOPSIS
 
-Quick summary of what the module does.
-
-Perhaps a little code snippet.
-
     use Pg::Reindex;
 
-    my $foo = Pg::Reindex->new();
-    ...
+    Pg::Reindex::prepare($dbh, \@namespaces, \@tables, \@indexes);
+    Pg::Reindex::rebuild($dbh, \%options, $dryrun);
+    
+=head1 DESCRIPTION
+
+For good performance, postgresql indexes should be rebuilt on a regular basis.
+This can be done with the C<REINDEX> command, however, building indexes this way
+requires an exclusive lock on the table. On the other hand, using
+C<CREATE INDEX CONCURRENTLY> avoids this lock.
+
+This package builds new indexes using C<CREATE INDEX CONCURRENTLY>. Then it
+starts a transaction for each index in which it drops the old index and
+renames the new one.
+
+It handles normal indexes and C<PRIMARY KEY>, C<FOREIGN KEY> and C<UNIQUE>
+constraints.
+
+
+=head2 Streaming replication and throttling
+
+Before creating the next index, the streaming replication lag is checked to
+be below a certain limit. If so, nothing special happens and the index is
+built.
+
+Otherwise, C<rebuild> waits for the replicas to catch up. When the lag
+drops under a second limit, the C<rebuild> does not immediately continue.
+Instead it waits for another 30 seconds and checks the lag every second
+within that period. Only if the lag stays below the limit for the whole
+time, execution is continued. This grace period is to deal with the fact
+that a wal sender process may suddenly disappear and reappear after a
+few seconds. Without the grace period the program may encounter a false
+drop below the limit and hence continue. For large indexes this adds a
+lot of lag.
+
+=head2 Outline Usage
+
+To use Pg::Reindex,
+first you need to load the DBI module:
+
+  use DBI;
+  use strict;
+
+(The C<use strict;> isn't required but is strongly recommended.)
+
+Then you need to L</prepare> the indexes that you want rebuilt.
+You can filter by combinations of namespace, tables, and indexes.
+
+    Pg::Reindex::prepare($dbh, \@opt_namespaces,\@opt_tables, \@opt_indexes);
+
+After "preparing" the set of indexes to rebuilt, then you rebuild them:
+
+    Pg::Reindex::rebuild( $dbh, { ThrottleOn => 10000000, 
+        ThrottleOff => 100000, Validate => 1 }, $opt_dryrun);
+
 
 =head1 EXPORT
 
-A list of functions that can be exported.  You can delete this section
-if you don't export anything, such as for a purely object-oriented module.
 
 =head1 SUBROUTINES/METHODS
 
+=head2 prepare
 
-=head2 reindex
+C<Prepare> determines the list of indexes that would be re-indexed, and 
+sets up the data structures used by C<rebuild>. C<prepare> must be called
+before C<rebuild> is called.
+
+C<prepare> creates a new schema named C<reindex> with 2 tables, 
+C<worklist> and C<log>. C<Worklist> is created as C<UNLOGGED>
+table. C<prepare> saves information on all indexes that need to be rebuilt
+to C<worklist>. The information in C<worklist> is used by C<rebuild>.
+
+=item dbh
+
+DBI database handle to the database whose indexes are to be reindexed.
+
+=item namespaces
+
+Rebuild only indexes in the C<namespaces>. If C<namespaces> is empty, 
+indexes in all namespaces except the following are considered: 
+those beginning with C<pg_>, in C<information_schema>i, or are 
+C<sequences> namespaces.
+
+=item tables
+
+Rebuild only indexes that belong to the specified tables.
+
+
+=item indexes
+
+List of indexes to reindex.
+
+If C<tables>, C<namespaces> and C<indexes> are given simultaneously,
+only indexes satisfying all conditions are considered.
+
+=cut
+
+=head2 rebuild
+
+=item $dbh
+
+DBI database handle to the database whose indexes are to be reindexed.
+
+=item \%options
+
+    ThrottleOn  
+    ThrottleOff 
+    Validate    
+    
+   
+=item $dryrun
+
 
 =cut
 
@@ -231,7 +327,7 @@ sub wait_for_concurrent_tx {
     return;
 }
 
-sub _reindex {
+sub reindex {
     my ( $oid, $nspname, $quoted_nspname, $idxname, $quoted_idxname, $idxdef,
         $size, $opt_validate )
         = @_;
@@ -578,7 +674,7 @@ SQL
     return;
 }
 
-sub reindex {
+sub rebuild {
 
     my ( $options, $opt_validate );
 
@@ -589,7 +685,7 @@ sub reindex {
     $opt_throttle_off = $options->{ThrottleOff} || 100000;
 
     while ( my @idx = next_index() ) {
-        _reindex( @idx, $opt_validate );
+        reindex( @idx, $opt_validate );
         query '', $idx[0],
             q{UPDATE reindex.worklist SET status='done' WHERE idx=$1};
     }
@@ -643,7 +739,7 @@ L<http://search.cpan.org/dist/Pg-Reindex/>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2015 Torsten Förtsch.
+Copyright 2015 Binary Ltd.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of the the Artistic License (2.0). You may obtain a
