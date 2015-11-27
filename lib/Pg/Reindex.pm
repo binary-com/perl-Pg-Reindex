@@ -16,137 +16,7 @@ use Pod::Usage;
 use Time::HiRes ();
 
 our ( $dbh, $opt_dryrun, $opt_throttle_on, $opt_throttle_off );
-
-=head1 NAME
-
-Pg::Reindex - rebuild postgresql indexes concurrently without locking.
-
-
-=head1 VERSION
-
-Version 0.01
-
-=cut
-
 our $VERSION = '0.01';
-
-=head1 SYNOPSIS
-
-    use Pg::Reindex;
-
-    prepare($dbh, \@namespaces, \@tables, \@indexes);
-    rebuild($dbh, \%options, $dryrun);
-    
-=head1 DESCRIPTION
-
-For good performance, postgresql indexes should be rebuilt on a regular basis.
-This can be done with the C<REINDEX> command, however, building indexes this way
-requires an exclusive lock on the table. On the other hand, using
-C<CREATE INDEX CONCURRENTLY> avoids this lock.
-
-This package builds new indexes using C<CREATE INDEX CONCURRENTLY>. Then it
-starts a transaction for each index in which it drops the old index and
-renames the new one.
-
-It handles normal indexes and C<PRIMARY KEY>, C<FOREIGN KEY> and C<UNIQUE>
-constraints.
-
-
-=head2 Streaming replication and throttling
-
-Before creating the next index, the streaming replication lag is checked to
-be below a certain limit. If so, nothing special happens and the index is
-built.
-
-Otherwise, C<rebuild> waits for the replicas to catch up. When the lag
-drops under a second limit, the C<rebuild> does not immediately continue.
-Instead it waits for another 30 seconds and checks the lag every second
-within that period. Only if the lag stays below the limit for the whole
-time, execution is continued. This grace period is to deal with the fact
-that a wal sender process may suddenly disappear and reappear after a
-few seconds. Without the grace period the program may encounter a false
-drop below the limit and hence continue. For large indexes this adds a
-lot of lag.
-
-=head2 Outline Usage
-
-To use Pg::Reindex,
-first you need to load the DBI module:
-
-  use DBI;
-  use strict;
-
-(The C<use strict;> isn't required but is strongly recommended.)
-
-Then you need to L</prepare> the indexes that you want rebuilt.
-You can filter by combinations of namespace, tables, and indexes.
-
-    prepare($dbh, \@opt_namespaces,\@opt_tables, \@opt_indexes);
-
-After "preparing" the set of indexes to be rebuilt, then you rebuild them:
-
-    rebuild( $dbh, { ThrottleOn => 10000000, 
-        ThrottleOff => 100000, Validate => 1 }, $opt_dryrun);
-
-
-=head1 EXPORT
-
-
-=head1 SUBROUTINES/METHODS
-
-=head2 prepare
-
-C<Prepare> determines the list of indexes that would be re-indexed, and 
-sets up the data structures used by C<rebuild>. C<prepare> must be called
-before C<rebuild> is called.
-
-C<prepare> creates a new schema named C<reindex> with 2 tables, 
-C<worklist> and C<log>. C<Worklist> is created as C<UNLOGGED>
-table. C<prepare> saves information on all indexes that need to be rebuilt
-to C<worklist>. The information in C<worklist> is used by C<rebuild>.
-
-=item dbh
-
-DBI database handle to the database whose indexes are to be reindexed.
-
-=item namespaces
-
-Rebuild only indexes in the C<namespaces>. If C<namespaces> is empty, 
-indexes in all namespaces except the following are considered: 
-those beginning with C<pg_>, in C<information_schema>i, or are 
-C<sequences> namespaces.
-
-=item tables
-
-Rebuild only indexes that belong to the specified tables.
-
-
-=item indexes
-
-List of indexes to reindex.
-
-If C<tables>, C<namespaces> and C<indexes> are given simultaneously,
-only indexes satisfying all conditions are considered.
-
-=cut
-
-=head2 rebuild
-
-=item $dbh
-
-DBI database handle to the database whose indexes are to be reindexed.
-
-=item \%options
-
-    ThrottleOn  
-    ThrottleOff 
-    Validate    
-    
-   
-=item $dryrun
-
-
-=cut
 
 sub lg {
     return print localtime() . ": ", @_;
@@ -786,6 +656,262 @@ sub run {
 }
 
 __PACKAGE__->run unless caller;
+
+=encoding utf8
+=head1 NAME
+
+Pg::Reindex - rebuild postgresql indexes concurrently without locking.
+
+=head1 VERSION
+
+Version 0.01
+
+=head1 SYNOPSIS
+
+=head3 Use as a module
+
+    use Pg::Reindex qw(prepare rebuild);
+
+    prepare($dbh, \@namespaces, \@tables, \@indexes);
+    rebuild($dbh, \%options, $dryrun);
+
+=head3 Run as a perl script
+
+    perl `perldoc -l Pg::Reindex` \
+               [--help] \
+               [--server=localhost] \
+               [--port=5432] \
+               [--user=postgres] \
+               [--password=PASSWORD] \
+               [--table=TABLE] ... \
+               [--namespace=NAMESPACE] ... \
+               [--index=INDEX] ... \
+               [--[no]validate] \
+               [--high_txn_lag=BYTES] \
+               [--log_txn_lag=BYTES] \
+               [--[no]dryrun] \
+               [prepare|continue]
+
+=head1 DESCRIPTION
+
+Postgresql indexes should be rebuilt on a regular basis for good performance.
+This can be done with the C<REINDEX> command, however, building indexes this way
+requires an exclusive lock on the table. On the other hand, using
+C<CREATE INDEX CONCURRENTLY> avoids this lock.
+
+C<Pg::Reindex> builds new indexes using C<CREATE INDEX CONCURRENTLY>. Then it
+starts a transaction for each index in which it drops the old index and
+renames the new one.
+
+It handles normal indexes and C<PRIMARY KEY>, C<FOREIGN KEY> and C<UNIQUE>
+constraints.
+
+=head2 Streaming replication and throttling
+
+Before creating the next index, the streaming replication lag is checked to
+be below a certain limit. If so, nothing special happens and the index is
+built.
+
+Otherwise, C<rebuild> waits for the replicas to catch up. When the lag
+drops under a second limit, the C<rebuild> does not immediately continue.
+Instead it waits for another 30 seconds and checks the lag every second
+within that period. Only if the lag stays below the limit for the whole
+time, execution is continued. This grace period is to deal with the fact
+that a wal sender process may suddenly disappear and reappear after a
+few seconds. Without the grace period the program may encounter a false
+drop below the limit and hence continue. For large indexes this adds a
+lot of lag.
+
+=head1 USING AS A MODULE
+
+To use Pg::Reindex as a module, first you need to load the 
+Pg::Reindex module:
+
+  use Pg::Reindex qw(prepare rebuild);
+  use strict;
+
+(The C<use strict;> isn't required but is strongly recommended.)
+
+Then you need to L</prepare> the indexes that you want rebuilt.
+You can filter by combinations of namespace, tables, and indexes.
+
+    prepare($dbh, \@opt_namespaces,\@opt_tables, \@opt_indexes);
+
+After "preparing" the set of indexes to be rebuilt, then you rebuild them:
+
+    rebuild( $dbh, { ThrottleOn => 10000000, 
+        ThrottleOff => 100000, Validate => 1 }, $opt_dryrun);
+
+=head2 SUBROUTINES/METHODS
+
+=head3 prepare
+
+C<prepare> determines the list of indexes that would be re-indexed, and 
+sets up the data structures used by C<rebuild>. C<prepare> must be called
+before C<rebuild> is called.
+
+C<prepare> creates a new schema named C<reindex> with 2 tables, 
+C<worklist> and C<log>. C<Worklist> is created as C<UNLOGGED>
+table. C<prepare> saves information on all indexes that need to be rebuilt
+to C<worklist>. The information in C<worklist> is used by C<rebuild>.
+
+=over
+
+=item $dbh
+
+DBI database handle to the database whose indexes are to be reindexed.
+
+=item \@namespaces
+
+Rebuild only indexes in the C<namespaces>. If C<namespaces> is empty, 
+indexes in all namespaces except the following are considered: 
+those beginning with C<pg_>, in C<information_schema>i, or are 
+C<sequences> namespaces.
+
+=item \@tables
+
+Rebuild only indexes that belong to the specified tables.
+
+
+=item \@indexes
+
+List of indexes to reindex.
+
+=back
+
+If C<tables>, C<namespaces> and C<indexes> are given simultaneously,
+only indexes satisfying all conditions are considered.
+
+=head3 rebuild
+
+=over 
+
+=item $dbh
+
+DBI database handle to the database whose indexes are to be reindexed.
+
+=item \%options
+
+    ThrottleOn  
+    ThrottleOff 
+    Validate    
+    
+=item $dryrun
+
+=back
+
+=head1 USING AS A PERL SCRIPT
+
+
+To use Pg::Reindex as a perl script you need to have perl run it. The command
+below would do that by using C<perldoc> to determine C<Pg::Reindex>'s location.
+
+    perl `perldoc -l Pg::Reindex` \
+               [--help] \
+               [--server=localhost] \
+               [--port=5432] \
+               [--user=postgres] \
+               [--password=PASSWORD] \
+               [--table=TABLE] ... \
+               [--namespace=NAMESPACE] ... \
+               [--index=INDEX] ... \
+               [--[no]validate] \
+               [--high_txn_lag=BYTES] \
+               [--log_txn_lag=BYTES] \
+               [--[no]dryrun] \
+               [prepare|continue]
+
+=head2 OPTIONS
+
+Options can be abbreviated.
+
+=over 4
+
+=item --server
+
+Hostname / IP address or directory path to use to connect to the Postgres
+server. If you want to use a local UNIX domain socket, specify the socket
+directory path.
+
+Default: localhost
+
+=item --port
+
+The port to connect to.
+
+Default: 5432
+
+=item --user
+
+The user.
+
+Default: postgres
+
+=item --password
+
+a file name or open file descriptor where to read the password from.
+If the parameter value consists of only digits, it's evaluated as file
+descriptor.
+
+There is no default.
+
+A convenient way to specify the password on the BASH command line is
+
+ reindex.pl --password=3 3<<<my_secret
+
+That way the password appears in F<.bash_history>. But that file is
+usually only readable to the owner.
+
+=item --table
+
+Reindex only indexes that belong to the specified table.
+
+This option can be given multiple times.
+
+If C<--table>, C<--namespace> and C<--index> are given simultaneously,
+only indexes satisfying all conditions are considered.
+
+=item --namespace
+
+Without this option only namespaces are considered that are not in
+beginning with C<pg_>. Also C<information_schema> or C<sequences>
+namespaces are omitted.
+
+If C<--table>, C<--namespace> and C<--index> are given simultaneously,
+only indexes satisfying all conditions are considered.
+
+=item --index
+
+If C<--table>, C<--namespace> and C<--index> are given simultaneously,
+only indexes satisfying all conditions are considered.
+
+=item --[no]validate
+
+validate C<FOREIGN KEY> constraints or leave them C<NOT VALID>. Default
+it to validate.
+
+=item --[no]dryrun
+
+don't modify the database but print the essential SQL statements.
+
+=item --high-txn-lag
+
+the upper limit streaming replicas may lag behind in bytes.
+
+Default is 10,000,000.
+
+=item --low-txn-lag
+
+the lower limit in bytes when execution may be continued after it has been
+interrupted due to exceeding C<high_txn_lag>.
+
+Default is 100,000
+
+=item --help
+
+print this help
+
+=back
 
 =head1 AUTHOR
 
