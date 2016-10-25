@@ -14,13 +14,18 @@ before_install:
     - source ~/travis-perl-helpers/init
     - build-perl
     - perl -V
-    - cpanm DBI
-    - cpanm DBD::Pg
-    - cpanm AnyEvent
-    - cpanm POSIX
-    - cpanm Getopt::Long
-    - cpanm Pod::Usage
-    - cpanm Time::HiRes
+    - cpanm -qn DBI
+    - cpanm -qn DBD::Pg
+    - cpanm -qn AnyEvent
+    - cpanm -qn POSIX
+    - cpanm -qn Getopt::Long
+    - cpanm -qn Pod::Usage
+    - cpanm -qn Time::HiRes
+    - cpanm -qn Test::Requires::Git
+    - cpanm -qn Devel::Cover::Report::Codecov
+
+script:
+    perl Makefile.PL && make test && cover -test -report codecov
 
 notifications:
   email:
